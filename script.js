@@ -15,6 +15,7 @@ const permissionMsg = document.getElementById('permission-msg');
 const waveEl = document.getElementById('wave');
 const timerEl = document.getElementById('timer');
 const hpEl = document.getElementById('hp');
+const scoreEl = document.getElementById('score');
 const detectedEl = document.getElementById('detected');
 const endTitle = document.getElementById('end-title');
 const endSub = document.getElementById('end-sub');
@@ -35,7 +36,11 @@ const CONFIG = {
   missPenalty: 0,
   maxCents: 60,
   minRms: 0.012,
-  noteEventCooldown: 350
+  noteEventCooldown: 350,
+  particleCount: 16,
+  particleLife: 0.75,
+  explosionLife: 0.45,
+  ringFlashMs: 260
 };
 
 const NOTE_POOL = [
@@ -144,6 +149,9 @@ let score = 0;
 let currentTarget = null;
 let lastNoteEvent = 0;
 let lastDetectedNote = null;
+let ringFlashUntil = 0;
+let particles = [];
+let explosions = [];
 
 const noteFrequencies = NOTE_POOL.map((name) => ({
   name,
@@ -357,13 +365,57 @@ function applyDamage(amount) {
   }
 }
 
+function spawnParticles(x, y) {
+  for (let i = 0; i < CONFIG.particleCount; i += 1) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 60 + Math.random() * 90;
+    particles.push({
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: CONFIG.particleLife,
+      age: 0
+    });
+  }
+}
+
+function spawnExplosion(x, y) {
+  explosions.push({
+    x,
+    y,
+    age: 0,
+    life: CONFIG.explosionLife
+  });
+}
+
+function updateEffects(dt) {
+  particles = particles.filter((p) => {
+    p.age += dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vx *= 0.96;
+    p.vy *= 0.96;
+    return p.age < p.life;
+  });
+
+  explosions = explosions.filter((e) => {
+    e.age += dt;
+    return e.age < e.life;
+  });
+}
+
 function handleNoteEvent(noteName, now) {
   if (!noteName || notes.length === 0) return;
 
   if (currentTarget && currentTarget.dist >= ringInner && currentTarget.dist <= ringOuter) {
     if (noteName === currentTarget.note) {
       currentTarget.dead = true;
-      score += 1;
+      score += 10;
+      scoreEl.textContent = `PUAN ${score}`;
+      ringFlashUntil = now + CONFIG.ringFlashMs;
+      spawnExplosion(currentTarget.x, currentTarget.y);
+      spawnParticles(currentTarget.x, currentTarget.y);
       return;
     }
   }
@@ -375,12 +427,17 @@ function updateHUD(elapsed) {
   timerEl.textContent = formatTime(CONFIG.waveDuration - elapsed);
 }
 
-function draw() {
+function draw(now) {
   ctx.clearRect(0, 0, width, height);
 
   const ringActive = currentTarget && currentTarget.dist >= ringInner && currentTarget.dist <= ringOuter;
+  const ringFlash = now < ringFlashUntil;
   ctx.lineWidth = CONFIG.ringThickness;
-  ctx.strokeStyle = ringActive ? 'rgba(255, 77, 77, 0.9)' : 'rgba(249, 230, 93, 0.75)';
+  if (ringFlash) {
+    ctx.strokeStyle = 'rgba(50, 213, 131, 0.95)';
+  } else {
+    ctx.strokeStyle = ringActive ? 'rgba(255, 77, 77, 0.9)' : 'rgba(249, 230, 93, 0.75)';
+  }
   ctx.beginPath();
   ctx.arc(center.x, center.y, ringRadius, 0, Math.PI * 2);
   ctx.stroke();
@@ -406,6 +463,23 @@ function draw() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(note.note, note.x, note.y);
+  }
+
+  for (const explosion of explosions) {
+    const t = explosion.age / explosion.life;
+    const radius = 10 + t * 28;
+    const alpha = Math.max(0, 1 - t);
+    ctx.strokeStyle = `rgba(50, 213, 131, ${0.8 * alpha})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(explosion.x, explosion.y, radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  for (const particle of particles) {
+    const t = 1 - particle.age / particle.life;
+    ctx.fillStyle = `rgba(50, 213, 131, ${t})`;
+    ctx.fillRect(particle.x, particle.y, 3, 3);
   }
 }
 
@@ -434,6 +508,7 @@ function update(now) {
   }
 
   updateNotes(dt);
+  updateEffects(dt);
 
   const detected = detectPitch();
   detectedEl.textContent = `Nota: ${detected ?? '--'}`;
@@ -446,7 +521,7 @@ function update(now) {
     }
   }
 
-  draw();
+  draw(now);
 
   if (waveEnded && notes.length === 0) {
     nextWave();
@@ -470,6 +545,9 @@ function startWave(index) {
   schedule = buildSchedule(WAVES[waveIndex]);
   scheduleIndex = 0;
   notes = [];
+  particles = [];
+  explosions = [];
+  ringFlashUntil = 0;
   waveStart = performance.now();
   waveEnded = false;
   lastFrame = 0;
@@ -481,6 +559,7 @@ function startGame() {
   hp = 100;
   score = 0;
   hpEl.textContent = `HP ${hp}%`;
+  scoreEl.textContent = `PUAN ${score}`;
   startWave(0);
 }
 
@@ -488,8 +567,8 @@ function endGame(isWin) {
   currentState = isWin ? STATE.WIN : STATE.LOSE;
   endTitle.textContent = isWin ? 'You Win' : 'You Lose';
   endSub.textContent = isWin
-    ? '5 dalgayi basariyla tamamladin.'
-    : 'HP tukenince oyun biter. Yeniden dene.';
+    ? `5 dalgayi basariyla tamamladin. Puan: ${score}.`
+    : `HP tukenince oyun biter. Puan: ${score}.`;
   endScreen.classList.remove('hidden');
   endScreen.classList.add('active');
 }
