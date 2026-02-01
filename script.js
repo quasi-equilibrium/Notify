@@ -2,6 +2,7 @@
 const ctx = canvas.getContext('2d');
 
 const startScreen = document.getElementById('start-screen');
+const songSelect = document.getElementById('song-select');
 const endScreen = document.getElementById('end-screen');
 const intro = document.getElementById('intro');
 const tear = document.getElementById('tear');
@@ -10,6 +11,8 @@ const flash = document.getElementById('flash');
 const startBtn = document.getElementById('start-btn');
 const declineBtn = document.getElementById('decline-btn');
 const restartBtn = document.getElementById('restart-btn');
+const songList = document.getElementById('song-list');
+const songMsg = document.getElementById('song-msg');
 
 const permissionMsg = document.getElementById('permission-msg');
 const waveEl = document.getElementById('wave');
@@ -30,11 +33,12 @@ const STATE = {
 
 const CONFIG = {
   waveDuration: 30,
-  travelTime: 4.4,
-  ringThickness: 26,
+  travelTime: 5.2,
+  ringThickness: 28,
   penalty: 0,
   missPenalty: 0,
   requiredHitRate: 0.25,
+  minNoteGap: 2,
   maxCents: 60,
   minRms: 0.012,
   noteEventCooldown: 350,
@@ -141,6 +145,7 @@ let playerRadius = 12;
 let notes = [];
 let waveIndex = 0;
 let waveStart = 0;
+let currentWaveDuration = CONFIG.waveDuration;
 let schedule = [];
 let scheduleIndex = 0;
 let waveEnded = false;
@@ -156,6 +161,7 @@ let endReason = '';
 let ringFlashUntil = 0;
 let particles = [];
 let explosions = [];
+let activeWaves = [...WAVES];
 
 const noteFrequencies = NOTE_POOL.map((name) => ({
   name,
@@ -172,10 +178,10 @@ function resizeCanvas() {
   canvas.style.height = `${height}px`;
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   center = { x: width / 2, y: height / 2 };
-  ringRadius = Math.min(width, height) * 0.24;
+  ringRadius = Math.min(width, height) * 0.29;
   ringInner = ringRadius - CONFIG.ringThickness / 2;
   ringOuter = ringRadius + CONFIG.ringThickness / 2;
-  playerRadius = Math.min(width, height) * 0.025;
+  playerRadius = Math.min(width, height) * 0.02;
 }
 
 window.addEventListener('resize', resizeCanvas);
@@ -296,10 +302,21 @@ function buildSchedule(wave) {
     time += beats;
   }
   const scale = CONFIG.waveDuration / time;
-  return events.map((event) => ({
+  const scheduled = events.map((event) => ({
     note: event.note,
     time: event.time * scale
   }));
+
+  let lastTime = -Infinity;
+  for (const event of scheduled) {
+    if (event.time - lastTime < CONFIG.minNoteGap) {
+      event.time = lastTime + CONFIG.minNoteGap;
+    }
+    lastTime = event.time;
+  }
+
+  const duration = Math.max(CONFIG.waveDuration, lastTime + CONFIG.minNoteGap);
+  return { schedule: scheduled, duration };
 }
 
 function randomEdgePoint() {
@@ -428,8 +445,8 @@ function handleNoteEvent(noteName, now) {
 }
 
 function updateHUD(elapsed) {
-  waveEl.textContent = `Dalga ${waveIndex + 1}/${WAVES.length}`;
-  timerEl.textContent = formatTime(CONFIG.waveDuration - elapsed);
+  waveEl.textContent = `Dalga ${waveIndex + 1}/${activeWaves.length}`;
+  timerEl.textContent = formatTime(currentWaveDuration - elapsed);
 }
 
 function draw(now) {
@@ -438,6 +455,7 @@ function draw(now) {
   const ringActive = currentTarget && currentTarget.dist >= ringInner && currentTarget.dist <= ringOuter;
   const ringFlash = now < ringFlashUntil;
   ctx.lineWidth = CONFIG.ringThickness;
+  ctx.lineCap = 'round';
   if (ringFlash) {
     ctx.strokeStyle = 'rgba(50, 213, 131, 0.95)';
   } else {
@@ -447,17 +465,20 @@ function draw(now) {
   ctx.arc(center.x, center.y, ringRadius, 0, Math.PI * 2);
   ctx.stroke();
 
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.fillStyle = '#0b0c10';
   ctx.beginPath();
   ctx.arc(center.x, center.y, playerRadius, 0, Math.PI * 2);
   ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
 
   for (const note of notes) {
     const inRing = note.dist >= ringInner && note.dist <= ringOuter;
     ctx.fillStyle = inRing ? 'rgba(255, 77, 77, 0.95)' : 'rgba(238, 242, 247, 0.95)';
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
     ctx.lineWidth = 2;
-    const radius = 18;
+    const radius = 14;
     ctx.beginPath();
     ctx.arc(note.x, note.y, radius, 0, Math.PI * 2);
     ctx.fill();
@@ -508,7 +529,7 @@ function update(now) {
     }
   }
 
-  if (!waveEnded && elapsed >= CONFIG.waveDuration) {
+  if (!waveEnded && elapsed >= currentWaveDuration) {
     waveEnded = true;
   }
 
@@ -543,7 +564,7 @@ function update(now) {
 
 function nextWave() {
   waveIndex += 1;
-  if (waveIndex >= WAVES.length) {
+  if (waveIndex >= activeWaves.length) {
     endGame(true);
     return;
   }
@@ -552,7 +573,9 @@ function nextWave() {
 
 function startWave(index) {
   waveIndex = index;
-  schedule = buildSchedule(WAVES[waveIndex]);
+  const build = buildSchedule(activeWaves[waveIndex]);
+  schedule = build.schedule;
+  currentWaveDuration = build.duration;
   scheduleIndex = 0;
   waveHits = 0;
   waveTotal = schedule.length;
@@ -594,6 +617,8 @@ function resetUI() {
   endScreen.classList.remove('active');
   startScreen.classList.add('hidden');
   startScreen.classList.remove('active');
+  songSelect.classList.add('hidden');
+  songSelect.classList.remove('active');
 }
 
 function startIntro() {
@@ -672,9 +697,11 @@ startBtn.addEventListener('click', async () => {
     permissionMsg.textContent = result.reason;
     return;
   }
-  permissionMsg.textContent = 'Mikrofon aktif. Hazirlaniyor...';
-  resetUI();
-  startIntro();
+  permissionMsg.textContent = 'Mikrofon aktif. Sarki sec...';
+  startScreen.classList.add('hidden');
+  startScreen.classList.remove('active');
+  songSelect.classList.remove('hidden');
+  songSelect.classList.add('active');
 });
 
 declineBtn.addEventListener('click', () => {
@@ -686,9 +713,34 @@ restartBtn.addEventListener('click', () => {
   endScreen.classList.remove('active');
   startScreen.classList.remove('hidden');
   startScreen.classList.add('active');
+  songSelect.classList.add('hidden');
+  songSelect.classList.remove('active');
   permissionMsg.textContent = '';
   detectedEl.textContent = 'Nota: --';
   currentState = STATE.IDLE;
 });
 
+function setActiveWaves(startIndex) {
+  activeWaves = [WAVES[startIndex], ...WAVES.filter((_, idx) => idx !== startIndex)];
+}
+
+function renderSongOptions() {
+  songList.innerHTML = '';
+  WAVES.forEach((wave, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = `${index + 1}. ${wave.name}`;
+    button.addEventListener('click', () => {
+      songMsg.textContent = `Secildi: ${wave.name}`;
+      setActiveWaves(index);
+      songSelect.classList.add('hidden');
+      songSelect.classList.remove('active');
+      resetUI();
+      startIntro();
+    });
+    songList.appendChild(button);
+  });
+}
+
+renderSongOptions();
 startScreen.classList.add('active');

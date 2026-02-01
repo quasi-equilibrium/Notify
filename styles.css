@@ -74,6 +74,12 @@ body {
   letter-spacing: 0.12em;
 }
 
+#detected {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--accent-2);
+}
+
 .screen {
   position: absolute;
   inset: 0;
@@ -163,6 +169,20 @@ button.ghost {
   min-height: 18px;
   font-size: 0.8rem;
   color: var(--accent-2);
+}
+
+.song-list {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.song-list button {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  text-align: center;
 }
 
 .intro {
