@@ -29,18 +29,17 @@ const STATE = {
 
 const CONFIG = {
   waveDuration: 30,
-  travelTime: 2.2,
+  travelTime: 3.6,
   ringThickness: 18,
-  penalty: 5,
-  missPenalty: 5,
+  penalty: 0,
+  missPenalty: 0,
   maxCents: 60,
   minRms: 0.012,
   noteEventCooldown: 350
 };
 
 const NOTE_POOL = [
-  'C4', 'D4', 'E4', 'F4', 'G4', 'A4', 'B4',
-  'C5', 'D5', 'E5', 'F5', 'G5', 'A5', 'B5', 'C6'
+  'C4', 'D4', 'E4', 'F4', 'G4', 'A4', 'B4'
 ];
 
 const WAVES = [
@@ -528,7 +527,25 @@ function startIntro() {
 }
 
 async function initMic() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return { ok: false, reason: 'Tarayici mikrofonu desteklemiyor.' };
+  }
+  if (!window.isSecureContext) {
+    return { ok: false, reason: 'Mikrofon icin HTTPS gerekli.' };
+  }
+
   try {
+    if (navigator.permissions && navigator.permissions.query) {
+      try {
+        const status = await navigator.permissions.query({ name: 'microphone' });
+        if (status.state === 'denied') {
+          return { ok: false, reason: 'Mikrofon engelli. Site ayarlarindan izin verin.' };
+        }
+      } catch (error) {
+        // Permissions API may not support microphone on some browsers.
+      }
+    }
+
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
     await audioContext.resume();
@@ -537,17 +554,27 @@ async function initMic() {
     audioBuffer = new Float32Array(analyser.fftSize);
     micSource = audioContext.createMediaStreamSource(stream);
     micSource.connect(analyser);
-    return true;
+    return { ok: true };
   } catch (error) {
-    return false;
+    let reason = 'Mikrofon izni verilmedi.';
+    if (error && error.name === 'NotAllowedError') {
+      reason = 'Mikrofon izni reddedildi. Site ayarlarindan izin verin.';
+    } else if (error && error.name === 'NotFoundError') {
+      reason = 'Mikrofon bulunamadi.';
+    } else if (error && error.name === 'NotReadableError') {
+      reason = 'Mikrofon baska bir uygulama tarafindan kullaniyor.';
+    } else if (error && error.name === 'SecurityError') {
+      reason = 'Mikrofon icin HTTPS gerekli.';
+    }
+    return { ok: false, reason };
   }
 }
 
 startBtn.addEventListener('click', async () => {
   permissionMsg.textContent = 'Mikrofon izni isteniyor...';
-  const ok = await initMic();
-  if (!ok) {
-    permissionMsg.textContent = 'Mikrofon izni verilmedi. Oyun baslamadi.';
+  const result = await initMic();
+  if (!result.ok) {
+    permissionMsg.textContent = result.reason;
     return;
   }
   permissionMsg.textContent = 'Mikrofon aktif. Hazirlaniyor...';
