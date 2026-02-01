@@ -1,1 +1,65 @@
+﻿<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Nota Savunmasi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main id="app">
+    <canvas id="game" aria-label="Oyun alani"></canvas>
+    <div id="hud" aria-live="polite">
+      <div class="hud-row">
+        <div id="wave">Dalga 1/5</div>
+        <div id="timer">00:30</div>
+      </div>
+      <div class="hud-row">
+        <div id="hp">HP 100%</div>
+        <div id="detected">Nota: --</div>
+      </div>
+      <div id="hint">Notalar kirmizi halkaya girince dogru notayi cal.</div>
+    </div>
+  </main>
 
+  <section id="start-screen" class="screen active" aria-label="Baslangic ekrani">
+    <div class="panel">
+      <p class="eyebrow">Mobil Mikrofon Deneyimi</p>
+      <h1>Nota Savunmasi</h1>
+      <p class="lead">
+        Oyuncu merkezde sabit. Notalar her yonden gelir. Notalar kirmizi halkaya girdiginde
+        dogru notayi calarak yok et.
+      </p>
+      <div class="button-row">
+        <button id="start-btn" class="primary">Basla</button>
+        <button id="decline-btn" class="ghost">Hayir</button>
+      </div>
+      <p id="permission-msg" class="status"></p>
+    </div>
+  </section>
+
+  <section id="intro" class="intro hidden" aria-hidden="true">
+    <div class="glitch-panel top"></div>
+    <div class="glitch-panel right"></div>
+    <div class="glitch-panel bottom"></div>
+    <div class="glitch-panel left"></div>
+    <div id="tear">
+      <div class="binary">101010101010101</div>
+    </div>
+    <div id="flash"></div>
+  </section>
+
+  <section id="end-screen" class="screen hidden" aria-label="Bitis ekrani">
+    <div class="panel">
+      <h2 id="end-title">Sonuc</h2>
+      <p id="end-sub" class="lead"></p>
+      <button id="restart-btn" class="primary">Play Again</button>
+    </div>
+  </section>
+
+  <script src="script.js"></script>
+</body>
+</html>
