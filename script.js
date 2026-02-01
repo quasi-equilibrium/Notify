@@ -3,6 +3,7 @@ const ctx = canvas.getContext('2d');
 
 const startScreen = document.getElementById('start-screen');
 const songSelect = document.getElementById('song-select');
+const difficultySelect = document.getElementById('difficulty-select');
 const endScreen = document.getElementById('end-screen');
 const intro = document.getElementById('intro');
 const tear = document.getElementById('tear');
@@ -13,6 +14,8 @@ const declineBtn = document.getElementById('decline-btn');
 const restartBtn = document.getElementById('restart-btn');
 const songList = document.getElementById('song-list');
 const songMsg = document.getElementById('song-msg');
+const difficultyList = document.getElementById('difficulty-list');
+const difficultyMsg = document.getElementById('difficulty-msg');
 
 const permissionMsg = document.getElementById('permission-msg');
 const waveEl = document.getElementById('wave');
@@ -32,13 +35,15 @@ const STATE = {
 };
 
 const CONFIG = {
-  waveDuration: 30,
-  travelTime: 5.2,
+  baseWaveDuration: 30,
+  baseTravelTime: 5.2,
   ringThickness: 28,
   penalty: 0,
   missPenalty: 0,
+  innerPenalty: 10,
   requiredHitRate: 0.25,
-  minNoteGap: 2,
+  baseMinNoteGap: 2,
+  innerNeonOffset: 16,
   maxCents: 60,
   minRms: 0.012,
   noteEventCooldown: 350,
@@ -140,12 +145,15 @@ let center = { x: 0, y: 0 };
 let ringRadius = 0;
 let ringInner = 0;
 let ringOuter = 0;
+let innerNeonRadius = 0;
 let playerRadius = 12;
 
 let notes = [];
 let waveIndex = 0;
 let waveStart = 0;
-let currentWaveDuration = CONFIG.waveDuration;
+let currentWaveDuration = CONFIG.baseWaveDuration;
+let currentTravelTime = CONFIG.baseTravelTime;
+let currentMinGap = CONFIG.baseMinNoteGap;
 let schedule = [];
 let scheduleIndex = 0;
 let waveEnded = false;
@@ -162,6 +170,13 @@ let ringFlashUntil = 0;
 let particles = [];
 let explosions = [];
 let activeWaves = [...WAVES];
+let speedMultiplier = 1;
+
+const DIFFICULTIES = [
+  { key: 'easy', label: 'Kolay', multiplier: 1 },
+  { key: 'hard', label: 'Zor', multiplier: 2 },
+  { key: 'insane', label: 'Imkansiz', multiplier: 10 }
+];
 
 const noteFrequencies = NOTE_POOL.map((name) => ({
   name,
@@ -178,10 +193,11 @@ function resizeCanvas() {
   canvas.style.height = `${height}px`;
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   center = { x: width / 2, y: height / 2 };
-  ringRadius = Math.min(width, height) * 0.29;
+  ringRadius = Math.min(width, height) * 0.377;
   ringInner = ringRadius - CONFIG.ringThickness / 2;
   ringOuter = ringRadius + CONFIG.ringThickness / 2;
   playerRadius = Math.min(width, height) * 0.02;
+  innerNeonRadius = Math.max(playerRadius + 24, ringInner - CONFIG.innerNeonOffset);
 }
 
 window.addEventListener('resize', resizeCanvas);
@@ -301,7 +317,7 @@ function buildSchedule(wave) {
     events.push({ note, time });
     time += beats;
   }
-  const scale = CONFIG.waveDuration / time;
+  const scale = currentWaveDuration / time;
   const scheduled = events.map((event) => ({
     note: event.note,
     time: event.time * scale
@@ -309,13 +325,13 @@ function buildSchedule(wave) {
 
   let lastTime = -Infinity;
   for (const event of scheduled) {
-    if (event.time - lastTime < CONFIG.minNoteGap) {
-      event.time = lastTime + CONFIG.minNoteGap;
+    if (event.time - lastTime < currentMinGap) {
+      event.time = lastTime + currentMinGap;
     }
     lastTime = event.time;
   }
 
-  const duration = Math.max(CONFIG.waveDuration, lastTime + CONFIG.minNoteGap);
+  const duration = Math.max(currentWaveDuration, lastTime + currentMinGap);
   return { schedule: scheduled, duration };
 }
 
@@ -340,7 +356,7 @@ function spawnNote(noteName) {
   const dy = center.y - spawn.y;
   const distance = Math.hypot(dx, dy);
   const travelDistance = Math.max(1, distance - ringRadius);
-  const speed = travelDistance / CONFIG.travelTime;
+  const speed = travelDistance / currentTravelTime;
   const dirX = dx / distance;
   const dirY = dy / distance;
 
@@ -351,7 +367,8 @@ function spawnNote(noteName) {
     vx: dirX * speed,
     vy: dirY * speed,
     dist: distance,
-    dead: false
+    dead: false,
+    neonHit: false
   });
 }
 
@@ -361,7 +378,14 @@ function updateNotes(dt) {
     note.y += note.vy * dt;
     note.dist = Math.hypot(note.x - center.x, note.y - center.y);
 
-    if (note.dist < ringInner) {
+    if (!note.neonHit && note.dist <= innerNeonRadius) {
+      note.neonHit = true;
+      applyDamage(CONFIG.innerPenalty);
+      note.dead = true;
+      continue;
+    }
+
+    if (note.dist <= playerRadius) {
       applyDamage(CONFIG.missPenalty);
       note.dead = true;
     }
@@ -410,6 +434,24 @@ function spawnExplosion(x, y) {
   });
 }
 
+function playPop() {
+  if (!audioContext) return;
+  const osc = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  const start = audioContext.currentTime;
+  const end = start + 0.08;
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(340, start);
+  osc.frequency.exponentialRampToValueAtTime(140, end);
+  gain.gain.setValueAtTime(0.001, start);
+  gain.gain.exponentialRampToValueAtTime(0.24, start + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, end);
+  osc.connect(gain);
+  gain.connect(audioContext.destination);
+  osc.start(start);
+  osc.stop(end);
+}
+
 function updateEffects(dt) {
   particles = particles.filter((p) => {
     p.age += dt;
@@ -438,6 +480,7 @@ function handleNoteEvent(noteName, now) {
       ringFlashUntil = now + CONFIG.ringFlashMs;
       spawnExplosion(currentTarget.x, currentTarget.y);
       spawnParticles(currentTarget.x, currentTarget.y);
+      playPop();
       return;
     }
   }
@@ -465,6 +508,16 @@ function draw(now) {
   ctx.arc(center.x, center.y, ringRadius, 0, Math.PI * 2);
   ctx.stroke();
 
+  ctx.save();
+  ctx.shadowBlur = 14;
+  ctx.shadowColor = 'rgba(255, 60, 60, 0.8)';
+  ctx.strokeStyle = 'rgba(255, 60, 60, 0.95)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, innerNeonRadius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
   ctx.fillStyle = '#0b0c10';
   ctx.beginPath();
   ctx.arc(center.x, center.y, playerRadius, 0, Math.PI * 2);
@@ -475,7 +528,7 @@ function draw(now) {
 
   for (const note of notes) {
     const inRing = note.dist >= ringInner && note.dist <= ringOuter;
-    ctx.fillStyle = inRing ? 'rgba(255, 77, 77, 0.95)' : 'rgba(238, 242, 247, 0.95)';
+    ctx.fillStyle = inRing ? 'rgba(181, 88, 255, 0.95)' : 'rgba(238, 242, 247, 0.95)';
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
     ctx.lineWidth = 2;
     const radius = 14;
@@ -520,7 +573,7 @@ function update(now) {
 
   while (scheduleIndex < schedule.length) {
     const hitTime = schedule[scheduleIndex].time;
-    const spawnTime = hitTime - CONFIG.travelTime;
+    const spawnTime = hitTime - currentTravelTime;
     if (elapsed >= spawnTime) {
       spawnNote(schedule[scheduleIndex].note);
       scheduleIndex += 1;
@@ -573,6 +626,7 @@ function nextWave() {
 
 function startWave(index) {
   waveIndex = index;
+  currentWaveDuration = CONFIG.baseWaveDuration / speedMultiplier;
   const build = buildSchedule(activeWaves[waveIndex]);
   schedule = build.schedule;
   currentWaveDuration = build.duration;
@@ -593,6 +647,9 @@ function startGame() {
   currentState = STATE.PLAYING;
   hp = 100;
   score = 0;
+  currentTravelTime = CONFIG.baseTravelTime / speedMultiplier;
+  currentMinGap = CONFIG.baseMinNoteGap / speedMultiplier;
+  currentWaveDuration = CONFIG.baseWaveDuration / speedMultiplier;
   hpEl.textContent = `HP ${hp}%`;
   scoreEl.textContent = `PUAN ${score}`;
   startWave(0);
@@ -619,6 +676,8 @@ function resetUI() {
   startScreen.classList.remove('active');
   songSelect.classList.add('hidden');
   songSelect.classList.remove('active');
+  difficultySelect.classList.add('hidden');
+  difficultySelect.classList.remove('active');
 }
 
 function startIntro() {
@@ -702,6 +761,7 @@ startBtn.addEventListener('click', async () => {
   startScreen.classList.remove('active');
   songSelect.classList.remove('hidden');
   songSelect.classList.add('active');
+  songMsg.textContent = '';
 });
 
 declineBtn.addEventListener('click', () => {
@@ -715,7 +775,11 @@ restartBtn.addEventListener('click', () => {
   startScreen.classList.add('active');
   songSelect.classList.add('hidden');
   songSelect.classList.remove('active');
+  difficultySelect.classList.add('hidden');
+  difficultySelect.classList.remove('active');
   permissionMsg.textContent = '';
+  songMsg.textContent = '';
+  difficultyMsg.textContent = '';
   detectedEl.textContent = 'Nota: --';
   currentState = STATE.IDLE;
 });
@@ -735,12 +799,30 @@ function renderSongOptions() {
       setActiveWaves(index);
       songSelect.classList.add('hidden');
       songSelect.classList.remove('active');
-      resetUI();
-      startIntro();
+      difficultyMsg.textContent = `Secili sarki: ${wave.name}`;
+      difficultySelect.classList.remove('hidden');
+      difficultySelect.classList.add('active');
     });
     songList.appendChild(button);
   });
 }
 
+function renderDifficultyOptions() {
+  difficultyList.innerHTML = '';
+  DIFFICULTIES.forEach((difficulty) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = difficulty.label;
+    button.addEventListener('click', () => {
+      speedMultiplier = difficulty.multiplier;
+      difficultyMsg.textContent = `Zorluk: ${difficulty.label}`;
+      resetUI();
+      startIntro();
+    });
+    difficultyList.appendChild(button);
+  });
+}
+
 renderSongOptions();
+renderDifficultyOptions();
 startScreen.classList.add('active');
