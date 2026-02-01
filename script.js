@@ -30,10 +30,11 @@ const STATE = {
 
 const CONFIG = {
   waveDuration: 30,
-  travelTime: 3.6,
-  ringThickness: 18,
+  travelTime: 4.4,
+  ringThickness: 26,
   penalty: 0,
   missPenalty: 0,
+  requiredHitRate: 0.25,
   maxCents: 60,
   minRms: 0.012,
   noteEventCooldown: 350,
@@ -143,12 +144,15 @@ let waveStart = 0;
 let schedule = [];
 let scheduleIndex = 0;
 let waveEnded = false;
+let waveHits = 0;
+let waveTotal = 0;
 let hp = 100;
 let lastFrame = 0;
 let score = 0;
 let currentTarget = null;
 let lastNoteEvent = 0;
 let lastDetectedNote = null;
+let endReason = '';
 let ringFlashUntil = 0;
 let particles = [];
 let explosions = [];
@@ -168,7 +172,7 @@ function resizeCanvas() {
   canvas.style.height = `${height}px`;
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   center = { x: width / 2, y: height / 2 };
-  ringRadius = Math.min(width, height) * 0.18;
+  ringRadius = Math.min(width, height) * 0.24;
   ringInner = ringRadius - CONFIG.ringThickness / 2;
   ringOuter = ringRadius + CONFIG.ringThickness / 2;
   playerRadius = Math.min(width, height) * 0.025;
@@ -361,7 +365,7 @@ function applyDamage(amount) {
   hp = Math.max(0, hp - amount);
   hpEl.textContent = `HP ${hp}%`;
   if (hp <= 0) {
-    endGame(false);
+    endGame(false, 'HP tukenince oyun biter.');
   }
 }
 
@@ -413,6 +417,7 @@ function handleNoteEvent(noteName, now) {
       currentTarget.dead = true;
       score += 10;
       scoreEl.textContent = `PUAN ${score}`;
+      waveHits += 1;
       ringFlashUntil = now + CONFIG.ringFlashMs;
       spawnExplosion(currentTarget.x, currentTarget.y);
       spawnParticles(currentTarget.x, currentTarget.y);
@@ -524,6 +529,11 @@ function update(now) {
   draw(now);
 
   if (waveEnded && notes.length === 0) {
+    const hitRate = waveTotal > 0 ? waveHits / waveTotal : 0;
+    if (hitRate < CONFIG.requiredHitRate) {
+      endGame(false, 'Isabet orani %25 altinda.');
+      return;
+    }
     nextWave();
     return;
   }
@@ -544,6 +554,8 @@ function startWave(index) {
   waveIndex = index;
   schedule = buildSchedule(WAVES[waveIndex]);
   scheduleIndex = 0;
+  waveHits = 0;
+  waveTotal = schedule.length;
   notes = [];
   particles = [];
   explosions = [];
@@ -563,12 +575,16 @@ function startGame() {
   startWave(0);
 }
 
-function endGame(isWin) {
+function endGame(isWin, reason = '') {
   currentState = isWin ? STATE.WIN : STATE.LOSE;
+  endReason = reason;
   endTitle.textContent = isWin ? 'You Win' : 'You Lose';
-  endSub.textContent = isWin
-    ? `5 dalgayi basariyla tamamladin. Puan: ${score}.`
-    : `HP tukenince oyun biter. Puan: ${score}.`;
+  if (isWin) {
+    endSub.textContent = `5 dalgayi basariyla tamamladin. Puan: ${score}.`;
+  } else {
+    const reasonText = endReason ? ` ${endReason}` : '';
+    endSub.textContent = `Oyun bitti.${reasonText} Puan: ${score}.`;
+  }
   endScreen.classList.remove('hidden');
   endScreen.classList.add('active');
 }
